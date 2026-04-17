@@ -10,18 +10,17 @@ const dbConfig = {
   database: 'your_database',
   password: 'your_password',
   port: 5432,
-  max: 100, // max number of connections
+  max: 50, // reduced max number of connections to prevent exhaustion
   idleTimeoutMillis: 30000, // 30 seconds
-  connectionTimeoutMillis: 2000, // 2 seconds
+  connectionTimeoutMillis: 5000, // increased connection timeout to 5 seconds
 };
 
-// Create a connection pool
+// Create a connection pool with a retry mechanism
 const pool = new Pool(dbConfig);
 
 // Handle database connection errors
 pool.on('error', (err, client) => {
   console.error('Database connection error:', err);
-  process.exit(1); // exit the process
 });
 
 app.get('/', (req, res) => {
@@ -39,14 +38,25 @@ app.get('/api/broken', (req, res) => {
   }
 });
 
-// Add a route to test database connection
+// Add a route to test database connection with retry
 app.get('/api/db-test', async (req, res) => {
-  try {
-    const result = await pool.query('SELECT 1');
-    res.json({ success: true, result: result.rows[0] });
-  } catch (err) {
-    console.error('Database query error:', err);
-    res.status(503).json({ success: false, error: 'Database connection failed' });
+  let retryCount = 0;
+  const maxRetries = 3;
+
+  while (retryCount <= maxRetries) {
+    try {
+      const result = await pool.query('SELECT 1');
+      res.json({ success: true, result: result.rows[0] });
+      break;
+    } catch (err) {
+      console.error('Database query error:', err);
+      retryCount++;
+      if (retryCount > maxRetries) {
+        res.status(503).json({ success: false, error: 'Database connection failed' });
+      } else {
+        await new Promise(resolve => setTimeout(resolve, 1000)); // wait 1 second before retrying
+      }
+    }
   }
 });
 
